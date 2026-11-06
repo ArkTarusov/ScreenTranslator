@@ -2,6 +2,11 @@ import common as c
 from config import ssl_dir, os_name
 import sys
 import xml.etree.ElementTree as ET
+import os
+
+if os.environ.get('SKIP_QT_SSL') == '1':
+    c.print('>> SKIP_QT_SSL=1: OpenSSL not downloaded for {}, HTTPS updates disabled'.format(os_name))
+    exit(0)
 
 c.print('>> Downloading ssl for Qt for {}'.format(os_name))
 
