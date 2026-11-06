@@ -36,6 +36,8 @@ jobs:
 
       - name: Build
         shell: bash
+        env:
+          SKIP_QT_SSL: "1"
         run: |
           python ./share/ci/release.py
           echo "artifact=`python ./share/ci/release.py artifact_name`" >> $GITHUB_ENV
