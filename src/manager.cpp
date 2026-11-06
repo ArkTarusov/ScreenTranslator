@@ -12,10 +12,17 @@
 #include "updates.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDesktopServices>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
 #include <QNetworkProxy>
+#include <QStandardPaths>
 #include <QThread>
 
 namespace
@@ -28,6 +35,66 @@ const auto updatesUrl =
     "updates.json";
 #endif
 const auto resultHideWaitUs = 300'000;
+
+// Captures are saved for later OCR comparison.
+// ST_CAPTURES_DIR overrides the folder, ST_CAPTURES_DIR=off disables saving.
+QString capturesDir()
+{
+  const auto env = qEnvironmentVariable("ST_CAPTURES_DIR");
+  if (env.compare(QLatin1String("off"), Qt::CaseInsensitive) == 0)
+    return {};
+  if (!env.isEmpty())
+    return env;
+  return QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
+         QLatin1String("/ScreenTranslatorCaptures");
+}
+
+void saveCaptureSample(const TaskPtr &task)
+{
+  if (task->captured.isNull())
+    return;
+
+  const auto dirPath = capturesDir();
+  if (dirPath.isEmpty())
+    return;
+
+  QDir dir(dirPath);
+  if (!dir.mkpath(QStringLiteral("."))) {
+    LWARNING() << "failed to create captures dir" << dirPath;
+    return;
+  }
+
+  const auto now = QDateTime::currentDateTime();
+  const auto baseName =
+      dir.filePath(now.toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
+
+  if (!task->captured.save(baseName + QLatin1String(".png"), "PNG")) {
+    LWARNING() << "failed to save capture" << baseName;
+    return;
+  }
+
+  QJsonObject meta{
+      {QStringLiteral("time"), now.toString(Qt::ISODateWithMs)},
+      {QStringLiteral("width"), task->captured.width()},
+      {QStringLiteral("height"), task->captured.height()},
+      {QStringLiteral("sourceLanguage"), task->sourceLanguage},
+      {QStringLiteral("targetLanguage"), task->targetLanguage},
+      {QStringLiteral("recognized"), task->recognized},
+      {QStringLiteral("corrected"), task->corrected},
+      {QStringLiteral("translated"), task->translated},
+      {QStringLiteral("usedTranslator"), task->usedTranslator},
+      {QStringLiteral("error"), task->error},
+      {QStringLiteral("translatorErrors"),
+       QJsonArray::fromStringList(task->translatorErrors)},
+  };
+
+  QFile file(baseName + QLatin1String(".json"));
+  if (!file.open(QFile::WriteOnly | QFile::Truncate)) {
+    LWARNING() << "failed to save capture meta" << file.fileName();
+    return;
+  }
+  file.write(QJsonDocument(meta).toJson(QJsonDocument::Indented));
+}
 }  // namespace
 using Loader = update::Loader;
 
@@ -205,6 +272,8 @@ void Manager::finishTask(const TaskPtr &task)
 {
   SOFT_ASSERT(task, return );
   LTRACE() << "finishTask" << task;
+
+  saveCaptureSample(task);
 
   --activeTaskCount_;
   tray_->setActiveTaskCount(activeTaskCount_);
